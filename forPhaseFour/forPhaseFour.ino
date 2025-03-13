@@ -19,7 +19,8 @@
 
 #define motorSpeed 130
 
-volatile bool junctionDetected = false;
+volatile bool junctionDetected = false;  // Flag set in ISR
+volatile bool isrLock = false;           // Prevent multiple ISR triggers
 volatile int pathIndex = 0;
 int pathSize = 0;
 const char** path;
@@ -31,15 +32,11 @@ const char** pathSequence(int &size) {
     return sequence;
 }
 
-volatile unsigned long lastInterruptTime = 0;  // Stores last interrupt time to debounce
-
+// ISR to detect junctions
 void detectJunction() {
-    // Debounce check (Ignore interrupts occurring within 200 ms of each other)
-    bool leftSensor = digitalRead(LINESENSOR1);
-    bool rightSensor = digitalRead(LINESENSOR2);
-
-    if (leftSensor == LOW || rightSensor == LOW) {  
-        junctionDetected = true;  
+    if (!isrLock) {  // Ignore multiple triggers
+        junctionDetected = true;
+        isrLock = true;  // Lock ISR until main loop resets it
     }
 }
 
@@ -51,8 +48,6 @@ void moveStraight() {
     digitalWrite(IN3, HIGH);
     digitalWrite(IN1, LOW);
     digitalWrite(IN4, LOW);
-
-    
 }
 
 void turnLeft() {
@@ -75,8 +70,6 @@ void turnRight() {
     digitalWrite(IN3, LOW);
     delay(600);
     moveStraight();
-
-    
 }
 
 void stopMotors() {
@@ -102,14 +95,12 @@ void setup() {
     pinMode(LINESENSOR1, INPUT);
     pinMode(LINESENSOR5, INPUT);
 
-    // Attach interrupts with improved accuracy
+    // Attach interrupts
     attachInterrupt(digitalPinToInterrupt(LINESENSOR1), detectJunction, LOW);
     attachInterrupt(digitalPinToInterrupt(LINESENSOR5), detectJunction, LOW);
 
     // Get path sequence
     path = pathSequence(pathSize);
-
-    // stopMotors();
 }
 
 void loop() {
@@ -119,6 +110,7 @@ void loop() {
         while (1); // Stop execution
     }
 
+    // Execute the current command
     if (strcmp(path[pathIndex], "straight") == 0) {
         moveStraight();
     } 
@@ -129,12 +121,17 @@ void loop() {
         turnRight();
     }
 
-    // Verify the sensor state before moving to the next command
-    if (junctionDetected) {
+    // Wait for ISR trigger before proceeding
+    while (!junctionDetected);  
+
+    // Print and move to the next command
+    if (pathIndex < pathSize - 1) {  
         Serial.print("Junction detected! Moving to next command: ");
         Serial.println(path[pathIndex + 1]);
-        
-        pathIndex++;
-        junctionDetected = false; // Reset flag
     }
+
+    pathIndex++;
+    junctionDetected = false;  // Reset flag
+    delay(500);  // Allow sensor time to stabilize
+    isrLock = false;  // Unlock ISR for next detection
 }
