@@ -20,10 +20,10 @@
 #define motorSpeed 130
 
 volatile bool junctionDetected = false;  // Flag set in ISR
-volatile bool isrLock = false;           // Prevent multiple ISR triggers
 volatile int pathIndex = 0;
 int pathSize = 0;
 const char** path;
+unsigned long lastInterruptTime = 0;  // Debounce timestamp
 
 // Function to retrieve the path sequence
 const char** pathSequence(int &size) {
@@ -34,9 +34,12 @@ const char** pathSequence(int &size) {
 
 // ISR to detect junctions
 void detectJunction() {
-    if (!isrLock) {  // Ignore multiple triggers
+    unsigned long currentTime = millis();
+    
+    // Debounce: Ignore interrupts occurring too quickly (200ms)
+    if (currentTime - lastInterruptTime > 200) {
         junctionDetected = true;
-        isrLock = true;  // Lock ISR until main loop resets it
+        lastInterruptTime = currentTime;
     }
 }
 
@@ -110,7 +113,14 @@ void loop() {
         while (1); // Stop execution
     }
 
+    // Wait until a junction is detected
+    Serial.println("Waiting for junction...");
+    while (!junctionDetected);  // Blocking wait
+
     // Execute the current command
+    Serial.print("Junction detected! Moving to next command: ");
+    Serial.println(path[pathIndex]);
+
     if (strcmp(path[pathIndex], "straight") == 0) {
         moveStraight();
     } 
@@ -121,17 +131,8 @@ void loop() {
         turnRight();
     }
 
-    // Wait for ISR trigger before proceeding
-    while (!junctionDetected);  
-
-    // Print and move to the next command
-    if (pathIndex < pathSize - 1) {  
-        Serial.print("Junction detected! Moving to next command: ");
-        Serial.println(path[pathIndex + 1]);
-    }
-
+    // Move to next command
     pathIndex++;
     junctionDetected = false;  // Reset flag
     delay(500);  // Allow sensor time to stabilize
-    isrLock = false;  // Unlock ISR for next detection
 }
